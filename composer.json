@@ -12,7 +12,7 @@
 	},
 	"autoload" : {
 		"psr-4" : {
-			"Simplexis\\ObjectStore\\" : "src/"
+			"SimplexIS\\ObjectStore\\" : "src/"
 		}
 	},
 	"minimum-stability" : "dev",
