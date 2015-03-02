@@ -11,8 +11,8 @@
 		"rackspace/php-opencloud" : "~1"
 	},
 	"autoload" : {
-		"psr-4" : {
-			"SimplexIS\\ObjectStore\\" : "src/"
+		"psr-0" : {
+			"SimplexIS\\ObjectStore" : "src/"
 		}
 	},
 	"minimum-stability" : "dev",
