@@ -1,0 +1,21 @@
+{
+	"name" : "simplexis/object-store",
+	"authors" : [{
+			"name" : "Jeroen van Oort",
+			"email" : "jvanoort@simplexis.nl"
+		}
+	],
+	"require" : {
+		"php" : ">=5.4.0",
+		"illuminate/support" : "4.2.*",
+		"rackspace/php-opencloud" : "~1"
+	},
+	"autoload" : {
+		"psr-4" : {
+			"Simplexis\\ObjectStore" : ""
+		}
+	},
+	"minimum-stability" : "dev",
+	"description" : "Provides Laravelish access to OpenStack object stores",
+	"license" : "GPL-3.0"
+}
