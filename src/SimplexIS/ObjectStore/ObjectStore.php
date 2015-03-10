@@ -2,53 +2,45 @@
 
 namespace SimplexIS\ObjectStore;
 
+use Guzzle\Http\EntityBody;
+use Guzzle\Http\Exception\ClientErrorResponseException;
+
 class ObjectStore
 {
-
-    /**
-     *
-     * @var \OpenCloud\OpenStack
-     */
-    private $connection;
-
-    /**
-     *
-     * @var array OpenCloud\ObjectStore\Service
-     */
-    private $service;
-
     /**
      *
      * @return \OpenCloud\OpenStack
      */
     public function getConnection()
     {
-        if (! isset($this->connection)) {
-            $this->connection = new \OpenCloud\OpenStack($this->getConfig('openstack_identity_url'), [
-                'username' => $this->getConfig('username'),
-                'password' => $this->getConfig('password'),
-                'tenantName' => $this->getConfig('tenant')
-            ]);
-            
-            if ($this->getConfig('cache_credentials')) {
-                if (\Cache::has('object-store-credentials')) {
-                    $this->connection->importCredentials(unserialize(\Cache::get('object-store-credentials')));
-                }
-                
-                $token = $this->connection->getTokenObject();
-                if (! $token || $token->hasExpired()) {
-                    $this->connection->authenticate();
-                    \Cache::put('object-store-credentials', serialize($this->connection->exportCredentials()), 0);
-                }
+        $res =  new \OpenCloud\OpenStack($this->getConfig('openstack_identity_url'), [
+            'username' => $this->getConfig('username'),
+            'password' => $this->getConfig('password'),
+            'tenantName' => $this->getConfig('tenant')
+        ]);
+        
+        //Get credentials from cache if needed
+        if ($this->getConfig('cache_credentials')) {
+            if (\Cache::has('object-store-credentials')) {
+                $res->importCredentials(unserialize(\Cache::get('object-store-credentials')));
             }
+            
+            $token = $res->getTokenObject();
+            if (! $token || $token->hasExpired()) {
+                $res->authenticate();
+                Log::info('re-authenticated');
+                \Cache::put('object-store-credentials', serialize($res->exportCredentials()), 0);
+            }
+        }else{
+            $res->authenticate();
         }
         
-        return $this->connection;
+        return $res;
     }
 
     /**
      *
-     * @param string $urltype            
+     * @param string|null $urltype            
      * @return \OpenCloud\ObjectStore\Service
      */
     public function getService($urltype = null)
@@ -57,61 +49,128 @@ class ObjectStore
             $urltype = $this->getConfig('default_url_type');
         }
         
-        if (! isset($this->service[$urltype])) {
-            $this->service[$urltype] = $this->getConnection()->objectStoreService('swift', 'NL', $urltype);
-        }
-        
-        return $this->service[$urltype];
+        return $this->getConnection()->objectStoreService('swift', 'NL', $urltype);
     }
 
     /**
      *
-     * @param string $container            
-     * @param string $urltype            
-     * @return OpenCloud\ObjectStore\Resource\Container
+     * @param string $name            
+     * @param string|null $container            
+     * @param string|null $urltype            
+     * @return OpenCloud\ObjectStore\Resource\DataObject
      */
-    public function getContainer($container = null, $urltype = null)
+    public function getObject($name, $container = null, $urltype = null, $headers = [])
+    {
+        return $this
+            ->getConnection()
+            ->get(
+                $this->getObjectUrl($name, $container, $urltype), 
+                $headers
+                )
+            ->send()->getBody();
+    }
+    
+    /**
+     * 
+     * @param string|null $urltype
+     * @return Guzzle\Http\Url
+     */
+    public function getServiceUrl($urltype = null)
+    {
+        return $this->getService($urltype)->getUrl();
+    }
+    
+    /**
+     * 
+     * @param string $name
+     * @param string|null $container
+     * @param string|null $urltype
+     * @return Guzzle\Http\Url
+     */
+    public function getObjectUrl($name, $container = null, $urltype = null)
     {
         if (! $container) {
             $container = $this->getConfig('default_container');
         }
         
-        return $this->getService($urltype)->getContainer($this->getEnvironmentString() . $container);
+        return $this
+            ->getServiceUrl($urltype)
+            ->addPath($this->getEnvironmentString().$container)
+            ->addPath($name);
     }
-
+    
     /**
-     *
-     * @param string $name            
-     * @param string $container            
-     * @param string $urltype            
-     * @return OpenCloud\ObjectStore\Resource\DataObject
+     * 
+     * @param string $name
+     * @param mixed $data
+     * @param string|null $container
+     * @param string|null $urltype
+     * @param array $headers
      */
-    public function getObject($name, $container = null, $urltype = null)
+    public function uploadObject($name, $data, $container = null, $urltype = null, $headers = [])
     {
-        return $this->getContainer($container, $urltype)->getObject($name);
+        return $this
+            ->getConnection()
+            ->put(
+                $this->getObjectUrl($name, $container, $urltype), 
+                $headers, 
+                EntityBody::factory($data)
+                )
+            ->send();
     }
-
+    
     /**
-     *
-     * @param string $name            
-     * @param string $container            
-     * @param string $urltype            
-     * @return OpenCloud\ObjectStore\Resource\DataObject
-     */
-    public function getPartialObject($name, $container = null, $urltype = null)
-    {
-        return $this->getContainer($container, $urltype)->getPartialObject($name);
-    }
-
-    /**
-     *
-     * @param string $name            
-     * @param string $container            
+     * 
+     * @param string $name
+     * @param string|null $container
+     * @param string|null $urltype
+     * @throws ClientErrorResponseException
      * @return boolean
      */
-    public function objectExists($name, $container = null)
+    public function deleteObject($name, $container = null, $urltype = null)
     {
-        return $this->getContainer($container)->objectExists($name);
+        try {
+            $this
+            ->getConnection()
+            ->delete(
+                $this->getObjectUrl($name, $container, $urltype)
+                )
+            ->send()->getBody();
+        } catch (ClientErrorResponseException $e) {
+            if ($e->getResponse()->getStatusCode() === 404) {
+                return false;
+            } else {
+                throw $e;
+            }
+        }
+        
+        return true;
+    }
+
+    /**
+     *
+     * @param string $name            
+     * @param string|null $container            
+     * @return boolean
+     */
+    public function objectExists($name, $container = null, $urltype = null)
+    {
+        try {
+            $this
+            ->getConnection()
+            ->head(
+                $this->getObjectUrl($name, $container, $urltype)
+                )
+            ->send()->getBody();
+        } catch (ClientErrorResponseException $e) {
+            if ($e->getResponse()->getStatusCode() === 404) {
+                return false;
+            } else {
+                throw $e;
+            }
+        }
+        
+        return true;
     }
 
     /**
@@ -146,6 +205,10 @@ class ObjectStore
      */
     public function getTempURL($object, $container = null, $filename = null, $ssl = true, $expires = 10)
     {
+        if (! $container) {
+            $container = $this->getConfig('default_container');
+        }
+        
         $expires = time() + $expires;
         
         $hash = hash_hmac('sha1', "GET\n" . $expires . "\n/" . $this->getEnvironmentString() . $container . "/" . rawurlencode($object), $this->getConfig('temp_url_secret'));
